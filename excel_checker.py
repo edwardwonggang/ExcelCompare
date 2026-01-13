@@ -9,6 +9,8 @@ import os
 import sys
 import hashlib
 import json
+import subprocess
+import tempfile
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openpyxl import load_workbook
@@ -65,6 +67,25 @@ class ExcelChecker:
                 hash_md5.update(chunk)
         return hash_md5.hexdigest()
     
+    def _get_remote_file_content(self, filepath, branch="main"):
+        """获取远程仓库中的文件内容"""
+        try:
+            result = subprocess.run(
+                ['git', 'show', f'{branch}:{filepath}'],
+                capture_output=True,
+                timeout=self.config['timeout']
+            )
+            
+            if result.returncode == 0:
+                return result.stdout, None
+            else:
+                return None, f"无法获取远程文件: {filepath}"
+                
+        except subprocess.TimeoutExpired:
+            return None, f"获取远程文件超时: {filepath}"
+        except Exception as e:
+            return None, f"获取远程文件失败: {str(e)}"
+    
     def _get_revision_records(self, filepath):
         """获取修订记录"""
         try:
@@ -94,6 +115,46 @@ class ExcelChecker:
         except Exception as e:
             return None, f"读取修订记录失败: {str(e)}"
     
+    def _get_revision_records_from_bytes(self, content):
+        """从字节内容获取修订记录"""
+        try:
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
+                tmp_file.write(content)
+                tmp_file_path = tmp_file.name
+            
+            # 读取修订记录
+            records, error = self._get_revision_records(tmp_file_path)
+            
+            # 删除临时文件
+            os.unlink(tmp_file_path)
+            
+            return records, error
+            
+        except Exception as e:
+            return None, f"从字节内容读取修订记录失败: {str(e)}"
+    
+    def _compare_revision_records(self, local_records, remote_records):
+        """比较本地和远程的修订记录"""
+        if not remote_records:
+            return None, "远程文件没有修订记录，无法比较"
+        
+        if not local_records:
+            return False, "本地文件没有修订记录"
+        
+        # 获取远程最新的修订记录
+        remote_latest = remote_records[-1]
+        
+        # 检查本地是否包含远程最新的修订记录
+        for record in local_records:
+            if (record["修订人"] == remote_latest["修订人"] and
+                record["修订时间"] == remote_latest["修订时间"] and
+                record["修订内容"] == remote_latest["修订内容"]):
+                return True, None
+        
+        # 本地不包含远程最新的修订记录
+        return False, f"本地文件未包含远程最新的修订记录: {remote_latest['修订人']} - {remote_latest['修订时间']}"
+    
     def _check_single_file(self, filepath, relative_path):
         """检查单个文件"""
         result = {
@@ -115,8 +176,8 @@ class ExcelChecker:
                 result["status"] = "skipped"
                 return result
         
-        # 获取修订记录
-        records, error = self._get_revision_records(filepath)
+        # 获取本地修订记录
+        local_records, error = self._get_revision_records(filepath)
         
         if error:
             result["status"] = "error"
@@ -124,16 +185,45 @@ class ExcelChecker:
             return result
         
         # 检查修订记录是否为空
-        if not records:
+        if not local_records:
             result["status"] = "error"
             result["errors"].append("修改记录sheet页为空，请添加修订记录后再提交")
             return result
+        
+        # 获取远程文件内容
+        remote_content, error = self._get_remote_file_content(relative_path)
+        
+        if error:
+            # 无法获取远程文件，可能是新文件或网络问题，跳过版本检查
+            result["warnings"].append(f"无法获取远程文件: {error}")
+        else:
+            # 获取远程修订记录
+            remote_records, error = self._get_revision_records_from_bytes(remote_content)
+            
+            if error:
+                result["warnings"].append(f"无法读取远程修订记录: {error}")
+            else:
+                # 比较本地和远程的修订记录
+                is_up_to_date, error = self._compare_revision_records(local_records, remote_records)
+                
+                if error:
+                    result["status"] = "error"
+                    result["errors"].append(error)
+                    return result
+                
+                if not is_up_to_date:
+                    result["status"] = "error"
+                    result["errors"].append(
+                        "本地文件未基于远程最新版本，请先执行 'git pull' 获取最新版本，"
+                        "在此基础上进行修改后再提交"
+                    )
+                    return result
         
         # 更新缓存
         self.cache[relative_path] = {
             "hash": current_hash,
             "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "record_count": len(records)
+            "record_count": len(local_records)
         }
         
         return result
@@ -180,9 +270,15 @@ class ExcelChecker:
                         for error in result["errors"]:
                             print(f"  错误: {error}")
                             self.errors.append(f"{relative_path}: {error}")
+                    
+                    # 显示警告
+                    for warning in result.get("warnings", []):
+                        print(f"  警告: {warning}")
+                        self.warnings.append(f"{relative_path}: {warning}")
+                        
                 except Exception as e:
                     error_msg = f"{relative_path}: 检查时发生异常 - {str(e)}"
-                    print(f"✗ {error_msg}")
+                    print(f"[ERROR] {error_msg}")
                     self.errors.append(error_msg)
         
         # 保存缓存
@@ -224,7 +320,6 @@ def main():
         success = checker.check_files()
     else:
         # 检查暂存区的文件
-        import subprocess
         try:
             # 获取暂存区的Excel文件
             result = subprocess.run(
