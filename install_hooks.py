@@ -11,8 +11,10 @@ import shutil
 
 # 常量定义
 HOOKS_DIR = ".git/hooks"
-PRE_COMMIT_FILE = os.path.join(HOOKS_DIR, "pre-commit")
-PRE_COMMIT_CONTENT = """#!/usr/bin/env python3
+PRE_COMMIT_PY = os.path.join(HOOKS_DIR, "pre-commit.py")
+PRE_COMMIT_BAT = os.path.join(HOOKS_DIR, "pre-commit.bat")
+
+PRE_COMMIT_PY_CONTENT = """#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 \"\"\"
 Git pre-commit钩子
@@ -23,7 +25,10 @@ import sys
 import os
 
 # 添加项目根目录到Python路径
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# .git/hooks/pre-commit.py -> .git -> 项目根目录
+hooks_dir = os.path.dirname(os.path.abspath(__file__))
+git_dir = os.path.dirname(hooks_dir)
+project_root = os.path.dirname(git_dir)
 sys.path.insert(0, project_root)
 
 # 导入检查器
@@ -32,7 +37,7 @@ from excel_checker import ExcelChecker
 def main():
     \"\"\"主函数\"\"\"
     print("=" * 60)
-    print("Excel文件检查中...")
+    print("Excel file checking...")
     print("=" * 60)
     
     checker = ExcelChecker()
@@ -56,29 +61,29 @@ def main():
                     file_list.append((filepath, filepath))
             
             if file_list:
-                print(f"发现 {len(file_list)} 个Excel文件需要检查")
+                print(f"Found {len(file_list)} Excel files to check")
                 success = checker.check_files(file_list)
                 
                 if not success:
                     print("=" * 60)
-                    print("✗ Excel文件检查失败，提交已被拦截")
-                    print("请根据上述提示修复问题后重新提交")
+                    print("[ERROR] Excel file check failed, commit blocked")
+                    print("Please fix the issues and try again")
                     print("=" * 60)
                     sys.exit(1)
                 else:
                     print("=" * 60)
-                    print("✓ Excel文件检查通过")
+                    print("[OK] Excel file check passed")
                     print("=" * 60)
                     sys.exit(0)
             else:
-                print("暂存区中没有Excel文件，跳过检查")
+                print("No Excel files in staging area, skipping check")
                 sys.exit(0)
         else:
-            print("无法获取暂存区文件，跳过检查")
+            print("Cannot get staged files, skipping check")
             sys.exit(0)
     except Exception as e:
-        print(f"检查时发生异常: {str(e)}")
-        print("跳过检查，继续提交")
+        print(f"Exception during check: {str(e)}")
+        print("Skipping check, continuing commit")
         sys.exit(0)
 
 if __name__ == "__main__":
@@ -86,55 +91,54 @@ if __name__ == "__main__":
 """
 
 
+PRE_COMMIT_BAT_CONTENT = """@echo off
+python "%~dp0pre-commit.py"
+exit /b %ERRORLEVEL%
+"""
+
+
 def install_hooks():
     """安装Git钩子"""
     # 检查是否在Git仓库中
     if not os.path.exists(".git"):
-        print("错误: 当前目录不是Git仓库")
-        print("请先执行: git init")
+        print("Error: Current directory is not a Git repository")
+        print("Please run: git init")
         return False
     
     # 创建hooks目录
     if not os.path.exists(HOOKS_DIR):
         os.makedirs(HOOKS_DIR)
-        print(f"创建钩子目录: {HOOKS_DIR}")
+        print(f"Created hooks directory: {HOOKS_DIR}")
     
-    # 检查是否已存在pre-commit钩子
-    if os.path.exists(PRE_COMMIT_FILE):
-        backup_file = PRE_COMMIT_FILE + ".backup"
-        shutil.copy(PRE_COMMIT_FILE, backup_file)
-        print(f"已备份现有的pre-commit钩子到: {backup_file}")
+    # 写入pre-commit.py
+    with open(PRE_COMMIT_PY, 'w', encoding='utf-8') as f:
+        f.write(PRE_COMMIT_PY_CONTENT)
+    print(f"Created: {PRE_COMMIT_PY}")
     
-    # 写入pre-commit钩子
-    with open(PRE_COMMIT_FILE, 'w', encoding='utf-8') as f:
-        f.write(PRE_COMMIT_CONTENT)
+    # 写入pre-commit.bat
+    with open(PRE_COMMIT_BAT, 'w', encoding='utf-8') as f:
+        f.write(PRE_COMMIT_BAT_CONTENT)
+    print(f"Created: {PRE_COMMIT_BAT}")
     
-    # 设置可执行权限（Unix/Linux/Mac）
-    try:
-        os.chmod(PRE_COMMIT_FILE, 0o755)
-        print(f"设置钩子文件权限: {PRE_COMMIT_FILE}")
-    except Exception as e:
-        print(f"警告: 无法设置文件权限: {str(e)}")
-    
-    print(f"✓ 成功安装pre-commit钩子: {PRE_COMMIT_FILE}")
-    print("\n现在每次执行 'git commit' 时会自动检查Excel文件")
+    print(f"Successfully installed pre-commit hooks")
+    print("\nNow every time you run 'git commit', Excel files will be checked automatically")
     return True
 
 
 def main():
     """主函数"""
     print("=" * 60)
-    print("Git钩子安装程序")
+    print("Git Hook Installer")
     print("=" * 60)
     
     if install_hooks():
-        print("\n安装完成！")
-        print("\n使用说明:")
-        print("1. 修改Excel文件后执行: git add <文件名>")
-        print("2. 执行提交: git commit -m '提交信息'")
-        print("3. 如果检查失败，请根据提示修复问题后重新提交")
+        print("\nInstallation completed!")
+        print("\nUsage:")
+        print("1. Modify Excel files and run: git add <filename>")
+        print("2. Run commit: git commit -m 'commit message'")
+        print("3. If check fails, fix issues and try again")
     else:
-        print("\n安装失败！")
+        print("\nInstallation failed!")
         sys.exit(1)
 
 
