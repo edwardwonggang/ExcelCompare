@@ -172,11 +172,11 @@ class ExcelChecker:
                     results.append(result)
                     
                     if result["status"] == "pass":
-                        print(f"✓ {relative_path} - 检查通过")
+                        print(f"[OK] {relative_path} - 检查通过")
                     elif result["status"] == "skipped":
-                        print(f"- {relative_path} - 未修改，跳过检查")
+                        print(f"[SKIP] {relative_path} - 未修改，跳过检查")
                     elif result["status"] == "error":
-                        print(f"✗ {relative_path} - 检查失败")
+                        print(f"[ERROR] {relative_path} - 检查失败")
                         for error in result["errors"]:
                             print(f"  错误: {error}")
                             self.errors.append(f"{relative_path}: {error}")
