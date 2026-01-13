@@ -1,0 +1,6 @@
+{
+  "sheet_name": "修改记录",
+  "check_columns": ["修订人", "修订时间", "修订内容"],
+  "max_threads": 10,
+  "timeout": 30
+}
